@@ -75,6 +75,18 @@ export class WatchlistRepository {
       update: { label: input.label, enabled: true }
     });
   }
+  public async listEnabledTokens(chain: ChainId): Promise<Array<{ address: string; symbol: string | null }>> {
+    return this.prisma.watchlistToken.findMany({
+      where: { chain, enabled: true },
+      select: { tokenAddress: true, symbol: true }
+    }).then((tokens) => tokens.map((token) => ({ address: token.tokenAddress, symbol: token.symbol })));
+  }
+  public async listEnabledWallets(chain: ChainId): Promise<Array<{ wallet: string; label: string | null }>> {
+    return this.prisma.watchlistWallet.findMany({
+      where: { chain, enabled: true },
+      select: { wallet: true, label: true }
+    });
+  }
 }
 
 function isPrismaUniqueViolation(error: unknown): boolean {

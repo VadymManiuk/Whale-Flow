@@ -30,6 +30,10 @@ const schema = z.object({
   ROLLING_WINDOW_MINUTES: z.coerce.number().finite().positive().default(120),
   MIN_SWAP_USD_VALUE: z.coerce.number().finite().nonnegative().default(5_000),
   ALERT_COOLDOWN_MINUTES: z.coerce.number().finite().nonnegative().default(60),
+  EVM_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(300).default(20),
+  EVM_INITIAL_BLOCK_LOOKBACK: z.coerce.number().int().min(1).max(2_000).default(120),
+  MIN_TOKEN_LIQUIDITY_USD: z.coerce.number().finite().nonnegative().default(50_000),
+  SOLANA_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(600).default(45),
   DIP_BUYER_DETECTOR_ENABLED: booleanFromEnvironment
 }).superRefine((value, context) => {
   if (value.MIN_INTERVAL_MINUTES > value.MAX_INTERVAL_MINUTES) {

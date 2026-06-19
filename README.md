@@ -10,6 +10,7 @@ Alert-only monitoring MVP for repeated whale buying and selling across Ethereum,
 - Prisma persistence for swaps, wallet snapshots, alerts, tokens, and wallets.
 - Telegram notifier and a real Telegram connection test (when credentials are configured).
 - Watchlist CLI commands and chain-adapter boundaries for EVM and Solana.
+- Live polling for the highest-liquidity V2/V3 pool of each EVM watchlist token when an RPC URL is configured.
 - DEX Screener client with response validation, retry, and timeout.
 
 ## Setup
@@ -39,15 +40,19 @@ pnpm bot start
 
 For the deployed container, use `docker compose exec -T app pnpm telegram:test:prod` or `docker compose exec -T app pnpm health:prod`.
 
+Add a production token through the running container:
+
+```bash
+docker compose exec -T app node dist/cli.js token:add --chain base --address 0x... --symbol TOKEN
+```
+
 ## Current live-data boundary
 
-The EVM and Solana adapters are intentionally skeletons. They start safely but emit no fabricated swaps. Before live alerts can be sent, implement and configure:
+EVM polling is active once an EVM RPC URL and a watchlist token are configured. Solana remains a safe skeleton and emits no fabricated swaps. Before full multi-chain live alerts can be sent:
 
-1. EVM watchlist polling/log decoding for Uniswap V2/V3, PancakeSwap, and Aerodrome pools.
-2. Helius enhanced-transaction ingestion and Solana swap normalization.
-3. Wallet portfolio valuation, including stablecoin/native balance conversion and token balance price enrichment.
-4. Router, pool, CEX, and MEV filtering; then connect adapters to `SwapProcessingService.process`.
-5. Redis-backed detector state (the MVP detector uses in-memory state and resets on restart) and the optional dip-buyer PnL detector.
+1. Helius enhanced-transaction ingestion and Solana swap normalization.
+2. Router, pool, CEX, and MEV filtering beyond using the initiating EOA.
+3. Redis-backed detector state (the MVP detector uses in-memory state and resets on restart) and the optional dip-buyer PnL detector.
 
 ## Verification
 

@@ -3,7 +3,7 @@ import { EvmAdapter } from "./chains/evm/evm-adapter.js";
 import { SolanaAdapter } from "./chains/solana/solana-adapter.js";
 import { loadConfig } from "./config/config.js";
 import { createPrismaClient } from "./db/client.js";
-import { AlertRepository, SwapRepository } from "./db/repositories.js";
+import { AlertRepository, SwapRepository, WatchlistRepository } from "./db/repositories.js";
 import { GradualWhaleFlowDetector } from "./detectors/gradual-whale-flow-detector.js";
 import { MemoryDetectorState } from "./detectors/memory-detector-state.js";
 import { createTelegramNotifier } from "./integrations/telegram/telegram-notifier.js";
@@ -12,16 +12,19 @@ import { createRedisClient } from "./services/redis-cache.js";
 import { SwapProcessingService } from "./services/swap-processing-service.js";
 import { AdapterWalletValueProvider } from "./services/wallet-value-provider.js";
 import { createLogger } from "./utils/logger.js";
+import { DexScreenerClient } from "./integrations/price/dexscreener-client.js";
+import { EvmWatchlistPoller } from "./jobs/evm-watchlist-poller.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger();
   const prisma = createPrismaClient();
   const redis = createRedisClient(config.REDIS_URL);
+  const prices = new DexScreenerClient(config.DEXSCREENER_API_BASE);
   const adapters = new Map<ChainId, ChainAdapter>([
-    ["ethereum", new EvmAdapter("ethereum", "Ethereum", config.ALCHEMY_ETHEREUM_RPC_URL, logger)],
-    ["base", new EvmAdapter("base", "Base", config.ALCHEMY_BASE_RPC_URL, logger)],
-    ["bnb", new EvmAdapter("bnb", "BNB Chain", config.BNB_RPC_URL, logger)],
+    ["ethereum", new EvmAdapter("ethereum", "Ethereum", config.ALCHEMY_ETHEREUM_RPC_URL, logger, prices)],
+    ["base", new EvmAdapter("base", "Base", config.ALCHEMY_BASE_RPC_URL, logger, prices)],
+    ["bnb", new EvmAdapter("bnb", "BNB Chain", config.BNB_RPC_URL, logger, prices)],
     ["solana", new SolanaAdapter(config.HELIUS_API_KEY, logger)]
   ]);
   const detector = new GradualWhaleFlowDetector({
@@ -37,15 +40,35 @@ async function main(): Promise<void> {
 
   // The service is constructed here so an adapter can submit normalized swaps as
   // soon as live polling is implemented. It never signs or submits transactions.
-  new SwapProcessingService(new SwapRepository(prisma), detector, new AlertRepository(prisma), createTelegramNotifier(config), logger);
+  const watchlists = new WatchlistRepository(prisma);
+  const processor = new SwapProcessingService(new SwapRepository(prisma), detector, new AlertRepository(prisma), createTelegramNotifier(config), logger);
 
   await prisma.$connect();
   await redis.ping();
   await Promise.all([...adapters.values()].map((adapter) => adapter.start()));
-  logger.info({ adapters: adapters.size, telegramEnabled: Boolean(config.TELEGRAM_BOT_TOKEN) }, "Whale Flow started; live chain ingestion remains disabled until adapter implementations are configured");
+  const pollers = (["ethereum", "base", "bnb"] as const).flatMap((chain) => {
+    const adapter = adapters.get(chain);
+    if (!(adapter instanceof EvmAdapter) || !adapter.client) return [];
+    const poller = new EvmWatchlistPoller({
+      chain,
+      client: adapter.client,
+      watchlists,
+      prices,
+      processor,
+      redis,
+      logger,
+      intervalSeconds: config.EVM_POLL_INTERVAL_SECONDS,
+      initialBlockLookback: config.EVM_INITIAL_BLOCK_LOOKBACK,
+      minLiquidityUsd: config.MIN_TOKEN_LIQUIDITY_USD
+    });
+    poller.start();
+    return [poller];
+  });
+  logger.info({ adapters: adapters.size, pollers: pollers.length, telegramEnabled: Boolean(config.TELEGRAM_BOT_TOKEN) }, "Whale Flow started");
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Stopping Whale Flow");
+    pollers.forEach((poller) => poller.stop());
     await Promise.all([...adapters.values()].map((adapter) => adapter.stop()));
     await redis.quit();
     await prisma.$disconnect();
