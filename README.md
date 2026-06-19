@@ -37,6 +37,8 @@ pnpm bot start
 
 `pnpm bot start` runs the service once; `pnpm dev` runs it in watch mode.
 
+For the deployed container, use `docker compose exec -T app pnpm telegram:test:prod` or `docker compose exec -T app pnpm health:prod`.
+
 ## Current live-data boundary
 
 The EVM and Solana adapters are intentionally skeletons. They start safely but emit no fabricated swaps. Before live alerts can be sent, implement and configure:

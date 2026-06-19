@@ -22,4 +22,4 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/dist ./dist
 
 USER node
-CMD ["sh", "-c", "pnpm db:deploy && node dist/index.js"]
+CMD ["sh", "-c", "pnpm db:deploy && pnpm start:prod"]

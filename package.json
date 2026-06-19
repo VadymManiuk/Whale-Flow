@@ -14,7 +14,10 @@
     "test:watch": "vitest",
     "bot": "tsx src/cli.ts",
     "telegram:test": "tsx src/cli.ts telegram:test",
+    "telegram:test:prod": "node dist/cli.js telegram:test",
     "health": "tsx src/cli.ts health",
+    "health:prod": "node dist/cli.js health",
+    "start:prod": "node dist/index.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy"
