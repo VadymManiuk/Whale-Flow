@@ -13,7 +13,7 @@ const responseSchema = z.object({
     marketCap: z.number().optional(),
     fdv: z.number().optional(),
     url: z.string().url().optional()
-  })).optional()
+  })).nullable().optional()
 });
 
 export interface TokenMarketData {
