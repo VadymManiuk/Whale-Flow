@@ -29,6 +29,7 @@ export interface TokenMarketData {
 
 export class DexScreenerClient {
   private readonly poolCache = new Map<string, { expiresAt: number; pools: TokenMarketData[] }>();
+  private requestQueue: Promise<void> = Promise.resolve();
   public constructor(private readonly apiBase: string) {}
   public async getTokenMarketData(chain: ChainId, tokenAddress: string): Promise<TokenMarketData | null> {
     return (await this.getTokenPools(chain, tokenAddress))[0] ?? null;
@@ -37,7 +38,7 @@ export class DexScreenerClient {
     const cacheKey = `${chain}:${tokenAddress.toLowerCase()}`;
     const cached = this.poolCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.pools;
-    const response = await withRetry(async () => fetch(`${this.apiBase}/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`));
+    const response = await this.schedule(() => withRetry(async () => fetch(`${this.apiBase}/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`)));
     if (!response.ok) throw new Error(`DEX Screener returned HTTP ${response.status}`);
     const payload = responseSchema.parse(await response.json());
     const pairs = payload.pairs?.filter((item) => item.chainId === dexScreenerChainId(chain) && [item.baseToken.address, item.quoteToken.address].some((address) => address.toLowerCase() === tokenAddress.toLowerCase())) ?? [];
@@ -60,6 +61,14 @@ export class DexScreenerClient {
       });
     this.poolCache.set(cacheKey, { pools, expiresAt: Date.now() + 5 * 60_000 });
     return pools;
+  }
+  private schedule<T>(operation: () => Promise<T>): Promise<T> {
+    const request = this.requestQueue.then(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return operation();
+    });
+    this.requestQueue = request.then(() => undefined, () => undefined);
+    return request;
   }
 }
 
