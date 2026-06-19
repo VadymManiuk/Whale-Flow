@@ -1,4 +1,4 @@
-import { parseAbiItem, formatUnits, type Address, type PublicClient } from "viem";
+import { isAddress, parseAbiItem, formatUnits, type Address, type PublicClient } from "viem";
 import type { Redis } from "ioredis";
 import type { WatchlistRepository } from "../db/repositories.js";
 import type { ChainId } from "../models/chain.js";
@@ -61,11 +61,14 @@ export class EvmWatchlistPoller {
 
   private async pollToken(tokenAddress: string): Promise<void> {
     const market = await this.options.prices.getTokenMarketData(this.options.chain, tokenAddress);
-    if (!market || !market.poolAddress || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) return;
+    if (!market || !isAddress(tokenAddress) || !isAddress(market.poolAddress) || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) return;
     const latestBlock = await this.options.client.getBlockNumber();
     const cursorKey = `whale-flow:cursor:evm:${this.options.chain}:${market.poolAddress.toLowerCase()}`;
     const previous = await this.options.redis.get(cursorKey);
-    const fromBlock = previous ? BigInt(previous) + 1n : latestBlock - BigInt(this.options.initialBlockLookback);
+    const requestedStart = previous ? BigInt(previous) + 1n : latestBlock - BigInt(this.options.initialBlockLookback - 1);
+    // Alchemy Free limits eth_getLogs to ten blocks. A live monitor prioritizes
+    // current events after a long outage rather than failing every poll forever.
+    const fromBlock = requestedStart < latestBlock - 9n ? latestBlock - 9n : requestedStart;
     if (fromBlock > latestBlock) return;
     const pool = market.poolAddress as Address;
     const [token0, token1, decimals] = await Promise.all([
