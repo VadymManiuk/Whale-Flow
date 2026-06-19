@@ -3,7 +3,7 @@ import { EvmAdapter } from "./chains/evm/evm-adapter.js";
 import { SolanaAdapter } from "./chains/solana/solana-adapter.js";
 import { loadConfig } from "./config/config.js";
 import { createPrismaClient } from "./db/client.js";
-import { AlertRepository, SwapRepository, WatchlistRepository } from "./db/repositories.js";
+import { AlertRepository, DexPoolRepository, SwapRepository, WatchlistRepository } from "./db/repositories.js";
 import { GradualWhaleFlowDetector } from "./detectors/gradual-whale-flow-detector.js";
 import { MemoryDetectorState } from "./detectors/memory-detector-state.js";
 import { createTelegramNotifier } from "./integrations/telegram/telegram-notifier.js";
@@ -17,6 +17,7 @@ import { EvmWatchlistPoller } from "./jobs/evm-watchlist-poller.js";
 import { SolanaWalletPoller } from "./jobs/solana-wallet-poller.js";
 import { CoinGeckoClient } from "./integrations/price/coingecko-client.js";
 import { TokenUniverseDiscovery } from "./jobs/token-universe-discovery.js";
+import { PoolCatalogRefresh } from "./jobs/pool-catalog-refresh.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
   // The service is constructed here so an adapter can submit normalized swaps as
   // soon as live polling is implemented. It never signs or submits transactions.
   const watchlists = new WatchlistRepository(prisma);
+  const pools = new DexPoolRepository(prisma);
   const processor = new SwapProcessingService(new SwapRepository(prisma), detector, new AlertRepository(prisma), createTelegramNotifier(config), logger);
 
   await prisma.$connect();
@@ -55,8 +57,7 @@ async function main(): Promise<void> {
     const poller = new EvmWatchlistPoller({
       chain,
       client: adapter.client,
-      watchlists,
-      prices,
+      pools,
       processor,
       redis,
       logger,
@@ -73,6 +74,8 @@ async function main(): Promise<void> {
     poller.start();
     pollers.push(poller);
   }
+  const catalogRefreshers = (["ethereum", "base", "bnb"] as const).map((chain) => new PoolCatalogRefresh(chain, watchlists, pools, prices, logger));
+  catalogRefreshers.forEach((refresher) => refresher.start());
   const discovery = config.COINGECKO_DEMO_API_KEY
     ? new TokenUniverseDiscovery(new CoinGeckoClient(config.COINGECKO_DEMO_API_KEY), watchlists, logger, config.MIN_TOKEN_MARKET_CAP_USD, config.UNIVERSE_DISCOVERY_INTERVAL_MINUTES)
     : undefined;
@@ -82,6 +85,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Stopping Whale Flow");
     pollers.forEach((poller) => poller.stop());
+    catalogRefreshers.forEach((refresher) => refresher.stop());
     discovery?.stop();
     await Promise.all([...adapters.values()].map((adapter) => adapter.stop()));
     await redis.quit();

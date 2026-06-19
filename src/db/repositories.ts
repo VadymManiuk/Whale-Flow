@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { WhaleAlert } from "../models/alert.js";
 import type { ChainId } from "../models/chain.js";
 import type { NormalizedSwap } from "../models/swap.js";
+import type { TokenMarketData } from "../integrations/price/dexscreener-client.js";
 
 export class SwapRepository {
   public constructor(private readonly prisma: PrismaClient) {}
@@ -93,6 +94,20 @@ export class WatchlistRepository {
       where: active.length === 0 ? { autoDiscovered: true } : { autoDiscovered: true, NOT: { OR: active } },
       data: { enabled: false }
     });
+  }
+}
+
+export class DexPoolRepository {
+  public constructor(private readonly prisma: PrismaClient) {}
+  public async upsert(chain: ChainId, tokenAddress: string, pool: TokenMarketData): Promise<void> {
+    await this.prisma.dexPool.upsert({
+      where: { chain_poolAddress_tokenAddress: { chain, poolAddress: pool.poolAddress, tokenAddress } },
+      create: { chain, poolAddress: pool.poolAddress, tokenAddress, tokenSymbol: pool.symbol, quoteTokenAddress: pool.quoteTokenAddress, quoteTokenSymbol: pool.quoteTokenSymbol, priceUsd: pool.priceUsd, liquidityUsd: pool.liquidityUsd, chartUrl: pool.chartUrl },
+      update: { tokenSymbol: pool.symbol, quoteTokenAddress: pool.quoteTokenAddress, quoteTokenSymbol: pool.quoteTokenSymbol, priceUsd: pool.priceUsd, liquidityUsd: pool.liquidityUsd, chartUrl: pool.chartUrl, enabled: true }
+    });
+  }
+  public async listEnabled(chain: Extract<ChainId, "ethereum" | "base" | "bnb">): Promise<Array<{ tokenAddress: string; market: TokenMarketData }>> {
+    return this.prisma.dexPool.findMany({ where: { chain, enabled: true } }).then((pools) => pools.map((pool) => ({ tokenAddress: pool.tokenAddress, market: { symbol: pool.tokenSymbol ?? pool.tokenAddress, priceUsd: pool.priceUsd, liquidityUsd: pool.liquidityUsd, marketCapUsd: null, chartUrl: pool.chartUrl ?? undefined, poolAddress: pool.poolAddress, quoteTokenAddress: pool.quoteTokenAddress ?? "", quoteTokenSymbol: pool.quoteTokenSymbol ?? "" } })));
   }
 }
 

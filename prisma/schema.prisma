@@ -111,3 +111,22 @@ model WatchlistWallet {
 
   @@unique([chain, wallet])
 }
+
+model DexPool {
+  id               String   @id @default(cuid())
+  chain            Chain
+  poolAddress      String
+  tokenAddress     String
+  tokenSymbol      String?
+  quoteTokenAddress String?
+  quoteTokenSymbol String?
+  priceUsd         Float?
+  liquidityUsd     Float?
+  chartUrl         String?
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([chain, poolAddress, tokenAddress])
+  @@index([chain, enabled])
+}

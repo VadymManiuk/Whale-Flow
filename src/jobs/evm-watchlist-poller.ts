@@ -1,9 +1,9 @@
 import { formatUnits, isAddress, parseAbiItem, type Address, type PublicClient } from "viem";
 import type { Redis } from "ioredis";
-import type { WatchlistRepository } from "../db/repositories.js";
+import type { DexPoolRepository } from "../db/repositories.js";
 import type { ChainId } from "../models/chain.js";
 import type { NormalizedSwap } from "../models/swap.js";
-import type { DexScreenerClient, TokenMarketData } from "../integrations/price/dexscreener-client.js";
+import type { TokenMarketData } from "../integrations/price/dexscreener-client.js";
 import type { SwapProcessingService } from "../services/swap-processing-service.js";
 import type { Logger } from "../utils/logger.js";
 
@@ -21,7 +21,7 @@ interface V2Log extends LogBase { args: { amount0In?: bigint; amount1In?: bigint
 interface V3Log extends LogBase { args: { amount0?: bigint; amount1?: bigint; }; }
 
 export interface EvmPollerOptions {
-  chain: Extract<ChainId, "ethereum" | "base" | "bnb">; client: PublicClient; watchlists: WatchlistRepository; prices: DexScreenerClient;
+  chain: Extract<ChainId, "ethereum" | "base" | "bnb">; client: PublicClient; pools: DexPoolRepository;
   processor: SwapProcessingService; redis: Redis; logger: Logger; intervalSeconds: number; initialBlockLookback: number; minLiquidityUsd: number; batchSize: number;
 }
 
@@ -39,26 +39,21 @@ export class EvmWatchlistPoller {
     if (this.running || Date.now() < this.cooldownUntil) return;
     this.running = true;
     try {
-      const [tokens, latestBlock] = await Promise.all([this.options.watchlists.listEnabledTokens(this.options.chain), this.options.client.getBlockNumber()]);
-      const groups = await this.groupsFor(tokens.map((token) => token.address));
+      const [targets, latestBlock] = await Promise.all([this.options.pools.listEnabled(this.options.chain), this.options.client.getBlockNumber()]);
+      const groups = this.groupsFor(targets);
       for (const batch of chunk(groups, this.options.batchSize)) await this.pollBatch(batch, latestBlock);
     } catch (error) {
       if (isRateLimited(error)) { this.cooldownUntil = Date.now() + 60_000; this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry"); }
       else this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
     } finally { this.running = false; }
   }
-  private async groupsFor(tokens: string[]): Promise<PoolGroup[]> {
+  private groupsFor(targets: Array<{ tokenAddress: string; market: TokenMarketData }>): PoolGroup[] {
     const groups = new Map<string, PoolGroup>();
-    for (const token of tokens) {
-      if (!isAddress(token)) continue;
-      try {
-        for (const market of await this.options.prices.getTokenPools(this.options.chain, token)) {
-          if (!isAddress(market.poolAddress) || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
-          const key = market.poolAddress.toLowerCase();
-          const group = groups.get(key) ?? { pool: market.poolAddress as Address, targets: [] };
-          group.targets.push({ token, market }); groups.set(key, group);
-        }
-      } catch (error) { this.options.logger.warn({ err: error, chain: this.options.chain, token }, "Skipping token with unavailable pool data"); }
+    for (const { tokenAddress: token, market } of targets) {
+      if (!isAddress(token) || !isAddress(market.poolAddress) || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
+      const key = market.poolAddress.toLowerCase();
+      const group = groups.get(key) ?? { pool: market.poolAddress as Address, targets: [] };
+      group.targets.push({ token, market }); groups.set(key, group);
     }
     return [...groups.values()];
   }
