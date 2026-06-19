@@ -9,18 +9,20 @@ import type { Logger } from "../../utils/logger.js";
  * not enabled yet: providers and pool selection must be configured per DEX.
  */
 export class EvmAdapter implements ChainAdapter {
-  public readonly client: PublicClient;
+  public readonly client: PublicClient | undefined;
   public constructor(
     public readonly chainId: Extract<ChainId, "ethereum" | "base" | "bnb">,
     public readonly name: string,
     rpcUrl: string | undefined,
     private readonly logger: Logger
   ) {
-    this.client = createPublicClient({ transport: http(rpcUrl) });
+    // Live RPC is optional while this adapter is a polling skeleton. Creating a
+    // viem transport with no URL throws during application startup.
+    this.client = rpcUrl ? createPublicClient({ transport: http(rpcUrl) }) : undefined;
   }
 
   public async start(): Promise<void> {
-    this.logger.info({ chain: this.chainId }, "EVM adapter is configured as a watchlist polling skeleton; live DEX decoding is not enabled");
+    this.logger.info({ chain: this.chainId, rpcConfigured: Boolean(this.client) }, "EVM adapter is configured as a watchlist polling skeleton; live DEX decoding is not enabled");
   }
   public async stop(): Promise<void> { this.logger.info({ chain: this.chainId }, "EVM adapter stopped"); }
   public async getWalletTokenBalanceUsd(wallet: string, token: string): Promise<number | null> { void wallet; void token; return null; }
