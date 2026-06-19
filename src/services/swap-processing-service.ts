@@ -11,7 +11,8 @@ export class SwapProcessingService {
     private readonly detector: GradualWhaleFlowDetector,
     private readonly alerts: AlertRepository,
     private readonly telegram: TelegramNotifier,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly alertCooldownMinutes: number
   ) {}
 
   public async process(swap: NormalizedSwap): Promise<void> {
@@ -22,6 +23,13 @@ export class SwapProcessingService {
     const result = await this.detector.process(swap);
     if (!result.alert) {
       this.logger.debug({ reason: result.ignoredReason, txHash: swap.txHash }, "Swap did not create a whale alert");
+      return;
+    }
+    // Alert delivery time, not on-chain timestamp, defines cooldown. This also
+    // works when a provider returns an older event after a process restart.
+    const cooldownStart = new Date(Date.now() - this.alertCooldownMinutes * 60_000);
+    if (await this.alerts.existsSince(result.alert, cooldownStart)) {
+      this.logger.info({ chain: result.alert.chain, wallet: result.alert.wallet, token: result.alert.tokenAddress }, "Whale alert suppressed by persistent cooldown");
       return;
     }
     const message = formatWhaleAlert(result.alert);
