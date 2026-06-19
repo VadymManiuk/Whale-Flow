@@ -60,8 +60,14 @@ export class EvmWatchlistPoller {
   }
 
   private async pollToken(tokenAddress: string): Promise<void> {
-    const market = await this.options.prices.getTokenMarketData(this.options.chain, tokenAddress);
-    if (!market || !isAddress(tokenAddress) || !isAddress(market.poolAddress) || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) return;
+    if (!isAddress(tokenAddress)) return;
+    const pools = await this.options.prices.getTokenPools(this.options.chain, tokenAddress);
+    for (const pool of pools) {
+      if (!isAddress(pool.poolAddress) || (pool.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
+      await this.pollPool(tokenAddress, pool);
+    }
+  }
+  private async pollPool(tokenAddress: string, market: TokenMarketData): Promise<void> {
     const latestBlock = await this.options.client.getBlockNumber();
     const cursorKey = `whale-flow:cursor:evm:${this.options.chain}:${market.poolAddress.toLowerCase()}`;
     const previous = await this.options.redis.get(cursorKey);

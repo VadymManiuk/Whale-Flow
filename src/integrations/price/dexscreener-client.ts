@@ -30,23 +30,30 @@ export interface TokenMarketData {
 export class DexScreenerClient {
   public constructor(private readonly apiBase: string) {}
   public async getTokenMarketData(chain: ChainId, tokenAddress: string): Promise<TokenMarketData | null> {
+    return (await this.getTokenPools(chain, tokenAddress))[0] ?? null;
+  }
+  public async getTokenPools(chain: ChainId, tokenAddress: string): Promise<TokenMarketData[]> {
     const response = await withRetry(async () => fetch(`${this.apiBase}/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`));
     if (!response.ok) throw new Error(`DEX Screener returned HTTP ${response.status}`);
     const payload = responseSchema.parse(await response.json());
     const pairs = payload.pairs?.filter((item) => item.chainId === dexScreenerChainId(chain) && [item.baseToken.address, item.quoteToken.address].some((address) => address.toLowerCase() === tokenAddress.toLowerCase())) ?? [];
-    const pair = pairs.sort((left, right) => (right.liquidity?.usd ?? 0) - (left.liquidity?.usd ?? 0))[0];
-    if (!pair) return null;
-    const trackedIsBase = pair.baseToken.address.toLowerCase() === tokenAddress.toLowerCase();
-    return {
-      symbol: trackedIsBase ? pair.baseToken.symbol : pair.quoteToken.symbol,
-      priceUsd: pair.priceUsd ? Number(pair.priceUsd) : null,
-      liquidityUsd: pair.liquidity?.usd ?? null,
-      marketCapUsd: pair.marketCap ?? pair.fdv ?? null,
-      chartUrl: pair.url,
-      poolAddress: pair.pairAddress,
-      quoteTokenAddress: trackedIsBase ? pair.quoteToken.address : pair.baseToken.address,
-      quoteTokenSymbol: trackedIsBase ? pair.quoteToken.symbol : pair.baseToken.symbol
-    };
+    const uniquePools = new Set<string>();
+    return pairs
+      .sort((left, right) => (right.liquidity?.usd ?? 0) - (left.liquidity?.usd ?? 0))
+      .filter((pair) => !uniquePools.has(pair.pairAddress.toLowerCase()) && (uniquePools.add(pair.pairAddress.toLowerCase()) || true))
+      .map((pair) => {
+        const trackedIsBase = pair.baseToken.address.toLowerCase() === tokenAddress.toLowerCase();
+        return {
+          symbol: trackedIsBase ? pair.baseToken.symbol : pair.quoteToken.symbol,
+          priceUsd: pair.priceUsd ? Number(pair.priceUsd) : null,
+          liquidityUsd: pair.liquidity?.usd ?? null,
+          marketCapUsd: pair.marketCap ?? pair.fdv ?? null,
+          chartUrl: pair.url,
+          poolAddress: pair.pairAddress,
+          quoteTokenAddress: trackedIsBase ? pair.quoteToken.address : pair.baseToken.address,
+          quoteTokenSymbol: trackedIsBase ? pair.quoteToken.symbol : pair.baseToken.symbol
+        };
+      });
   }
 }
 
