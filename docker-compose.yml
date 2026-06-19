@@ -25,6 +25,35 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/whale_flow
+      REDIS_URL: redis://redis:6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ALCHEMY_ETHEREUM_RPC_URL: ${ALCHEMY_ETHEREUM_RPC_URL:-}
+      ALCHEMY_BASE_RPC_URL: ${ALCHEMY_BASE_RPC_URL:-}
+      BNB_RPC_URL: ${BNB_RPC_URL:-}
+      HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+      DEXSCREENER_API_BASE: ${DEXSCREENER_API_BASE:-https://api.dexscreener.com}
+      BIRDEYE_API_KEY: ${BIRDEYE_API_KEY:-}
+      MIN_REPEATING_SWAPS: ${MIN_REPEATING_SWAPS:-3}
+      MIN_WALLET_TOKEN_VALUE_USD: ${MIN_WALLET_TOKEN_VALUE_USD:-1000000}
+      MIN_WALLET_STABLE_OR_NATIVE_VALUE_USD: ${MIN_WALLET_STABLE_OR_NATIVE_VALUE_USD:-1000000}
+      MIN_INTERVAL_MINUTES: ${MIN_INTERVAL_MINUTES:-2}
+      MAX_INTERVAL_MINUTES: ${MAX_INTERVAL_MINUTES:-30}
+      ROLLING_WINDOW_MINUTES: ${ROLLING_WINDOW_MINUTES:-120}
+      MIN_SWAP_USD_VALUE: ${MIN_SWAP_USD_VALUE:-5000}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-60}
+      DIP_BUYER_DETECTOR_ENABLED: ${DIP_BUYER_DETECTOR_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:
