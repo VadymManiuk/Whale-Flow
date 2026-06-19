@@ -15,6 +15,8 @@ import { createLogger } from "./utils/logger.js";
 import { DexScreenerClient } from "./integrations/price/dexscreener-client.js";
 import { EvmWatchlistPoller } from "./jobs/evm-watchlist-poller.js";
 import { SolanaWalletPoller } from "./jobs/solana-wallet-poller.js";
+import { CoinGeckoClient } from "./integrations/price/coingecko-client.js";
+import { TokenUniverseDiscovery } from "./jobs/token-universe-discovery.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -70,11 +72,16 @@ async function main(): Promise<void> {
     poller.start();
     pollers.push(poller);
   }
-  logger.info({ adapters: adapters.size, pollers: pollers.length, telegramEnabled: Boolean(config.TELEGRAM_BOT_TOKEN) }, "Whale Flow started");
+  const discovery = config.COINGECKO_DEMO_API_KEY
+    ? new TokenUniverseDiscovery(new CoinGeckoClient(config.COINGECKO_DEMO_API_KEY), watchlists, logger, config.MIN_TOKEN_MARKET_CAP_USD, config.UNIVERSE_DISCOVERY_INTERVAL_MINUTES)
+    : undefined;
+  discovery?.start();
+  logger.info({ adapters: adapters.size, pollers: pollers.length, discoveryEnabled: Boolean(discovery), telegramEnabled: Boolean(config.TELEGRAM_BOT_TOKEN) }, "Whale Flow started");
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Stopping Whale Flow");
     pollers.forEach((poller) => poller.stop());
+    discovery?.stop();
     await Promise.all([...adapters.values()].map((adapter) => adapter.stop()));
     await redis.quit();
     await prisma.$disconnect();

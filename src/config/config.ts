@@ -20,6 +20,7 @@ const schema = z.object({
   ALCHEMY_BASE_RPC_URL: optionalUrl,
   BNB_RPC_URL: optionalUrl,
   HELIUS_API_KEY: optionalString,
+  COINGECKO_DEMO_API_KEY: optionalString,
   DEXSCREENER_API_BASE: z.string().url().default("https://api.dexscreener.com"),
   BIRDEYE_API_KEY: optionalString,
   MIN_REPEATING_SWAPS: z.coerce.number().finite().int().min(3).default(3),
@@ -34,6 +35,8 @@ const schema = z.object({
   EVM_INITIAL_BLOCK_LOOKBACK: z.coerce.number().int().min(1).max(2_000).default(120),
   MIN_TOKEN_LIQUIDITY_USD: z.coerce.number().finite().nonnegative().default(50_000),
   SOLANA_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(600).default(45),
+  UNIVERSE_DISCOVERY_INTERVAL_MINUTES: z.coerce.number().int().min(15).max(1_440).default(360),
+  MIN_TOKEN_MARKET_CAP_USD: z.coerce.number().finite().positive().default(5_000_000),
   DIP_BUYER_DETECTOR_ENABLED: booleanFromEnvironment
 }).superRefine((value, context) => {
   if (value.MIN_INTERVAL_MINUTES > value.MAX_INTERVAL_MINUTES) {
