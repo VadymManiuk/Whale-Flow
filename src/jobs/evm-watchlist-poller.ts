@@ -31,9 +31,13 @@ export class EvmWatchlistPoller {
   private running = false;
   private cooldownUntil = 0;
   private batchCursor = 0;
+  private effectiveBatchSize: number;
+  private successfulPolls = 0;
   private readonly metadata = new Map<string, PoolMetadata | null>();
   private readonly decimals = new Map<string, number | null>();
-  public constructor(private readonly options: EvmPollerOptions) {}
+  public constructor(private readonly options: EvmPollerOptions) {
+    this.effectiveBatchSize = options.batchSize;
+  }
   public start(): void { if (!this.timer) { void this.poll(); this.timer = setInterval(() => void this.poll(), this.options.intervalSeconds * 1_000); } }
   public stop(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
   private async poll(): Promise<void> {
@@ -42,14 +46,15 @@ export class EvmWatchlistPoller {
     try {
       const [targets, latestBlock] = await Promise.all([this.options.pools.listEnabled(this.options.chain), this.options.client.getBlockNumber()]);
       const groups = this.groupsFor(targets);
-      const batches = chunk(groups, this.options.batchSize);
+      const batches = chunk(groups, this.effectiveBatchSize);
       for (let index = 0; index < Math.min(this.options.batchesPerCycle, batches.length); index += 1) {
         const batch = batches[this.batchCursor % batches.length];
         this.batchCursor += 1;
         await this.pollBatch(batch, latestBlock);
       }
+      this.recordSuccessfulPoll();
     } catch (error) {
-      if (isRateLimited(error)) { this.cooldownUntil = Date.now() + 60_000; this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry"); }
+      if (isRateLimited(error)) this.reduceBatchAfterRateLimit();
       else this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
     } finally { this.running = false; }
   }
@@ -133,6 +138,21 @@ export class EvmWatchlistPoller {
   private async walletFor(hash: `0x${string}`, cache: Map<string, Address>): Promise<Address | null> { const cached = cache.get(hash); if (cached) return cached; try { const wallet = (await this.options.client.getTransaction({ hash })).from; cache.set(hash, wallet); return wallet; } catch { return null; } }
   private async timestampFor(block: bigint, cache: Map<bigint, Date>): Promise<Date> { const cached = cache.get(block); if (cached) return cached; const timestamp = new Date(Number((await this.options.client.getBlock({ blockNumber: block })).timestamp) * 1_000); cache.set(block, timestamp); return timestamp; }
   private cursorKey(pool: Address): string { return `whale-flow:cursor:evm:${this.options.chain}:${pool.toLowerCase()}`; }
+  private reduceBatchAfterRateLimit(): void {
+    const previousBatchSize = this.effectiveBatchSize;
+    this.effectiveBatchSize = Math.max(10, Math.floor(previousBatchSize / 2));
+    this.successfulPolls = 0;
+    this.cooldownUntil = Date.now() + 60_000;
+    this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60, previousBatchSize, nextBatchSize: this.effectiveBatchSize }, "EVM RPC rate limited; scanner paused and batch reduced");
+  }
+  private recordSuccessfulPoll(): void {
+    this.successfulPolls += 1;
+    if (this.successfulPolls < 12 || this.effectiveBatchSize >= this.options.batchSize) return;
+    const previousBatchSize = this.effectiveBatchSize;
+    this.effectiveBatchSize = Math.min(this.options.batchSize, this.effectiveBatchSize + 10);
+    this.successfulPolls = 0;
+    this.options.logger.info({ chain: this.options.chain, previousBatchSize, nextBatchSize: this.effectiveBatchSize }, "EVM scanner batch increased after stable polling");
+  }
 }
 function chunk<T>(items: T[], size: number): T[][] { return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size)); }
 function isRateLimited(error: unknown): boolean { return typeof error === "object" && error !== null && "status" in error && error.status === 429; }
