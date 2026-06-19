@@ -38,7 +38,7 @@ const schema = z.object({
   MIN_TOKEN_LIQUIDITY_USD: z.coerce.number().finite().nonnegative().default(0),
   SOLANA_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(600).default(45),
   UNIVERSE_DISCOVERY_INTERVAL_MINUTES: z.coerce.number().int().min(15).max(1_440).default(360),
-  MIN_TOKEN_MARKET_CAP_USD: z.coerce.number().finite().positive().default(5_000_000),
+  MIN_TOKEN_MARKET_CAP_USD: z.coerce.number().finite().positive().default(10_000_000),
   DIP_BUYER_DETECTOR_ENABLED: booleanFromEnvironment
 }).superRefine((value, context) => {
   if (value.MIN_INTERVAL_MINUTES > value.MAX_INTERVAL_MINUTES) {
