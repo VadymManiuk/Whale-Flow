@@ -34,6 +34,7 @@ export interface EvmPollerOptions {
 export class EvmWatchlistPoller {
   private timer: NodeJS.Timeout | undefined;
   private running = false;
+  private cooldownUntil = 0;
   public constructor(private readonly options: EvmPollerOptions) {}
 
   public start(): void {
@@ -48,6 +49,7 @@ export class EvmWatchlistPoller {
 
   private async poll(): Promise<void> {
     if (this.running) return;
+    if (Date.now() < this.cooldownUntil) return;
     this.running = true;
     try {
       const tokens = await this.options.watchlists.listEnabledTokens(this.options.chain);
@@ -56,11 +58,17 @@ export class EvmWatchlistPoller {
         try {
           await this.pollToken(token.address, latestBlock);
         } catch (error) {
+          if (isRateLimited(error)) throw error;
           this.options.logger.warn({ err: error, chain: this.options.chain, token: token.address }, "EVM token polling skipped after a recoverable error");
         }
       }
     } catch (error) {
-      this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
+      if (isRateLimited(error)) {
+        this.cooldownUntil = Date.now() + 60_000;
+        this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry");
+      } else {
+        this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
+      }
     } finally {
       this.running = false;
     }
@@ -74,6 +82,7 @@ export class EvmWatchlistPoller {
       try {
         await this.pollPool(tokenAddress, pool, latestBlock);
       } catch (error) {
+        if (isRateLimited(error)) throw error;
         this.options.logger.warn({ err: error, chain: this.options.chain, token: tokenAddress, pool: pool.poolAddress }, "EVM pool polling skipped after a recoverable error");
       }
     }
@@ -171,4 +180,8 @@ export class EvmWatchlistPoller {
       priceUsd: input.market.priceUsd
     };
   }
+}
+
+function isRateLimited(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 429;
 }
