@@ -63,6 +63,7 @@ async function main(): Promise<void> {
       logger,
       intervalSeconds: config.EVM_POLL_INTERVAL_SECONDS,
       batchSize: config.EVM_POOL_BATCH_SIZE,
+      batchesPerCycle: config.EVM_BATCHES_PER_CYCLE,
       initialBlockLookback: config.EVM_INITIAL_BLOCK_LOOKBACK,
       minLiquidityUsd: config.MIN_TOKEN_LIQUIDITY_USD
     });

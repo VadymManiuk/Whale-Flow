@@ -33,6 +33,7 @@ const schema = z.object({
   ALERT_COOLDOWN_MINUTES: z.coerce.number().finite().nonnegative().default(60),
   EVM_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(300).default(20),
   EVM_POOL_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  EVM_BATCHES_PER_CYCLE: z.coerce.number().int().min(1).max(10).default(1),
   EVM_INITIAL_BLOCK_LOOKBACK: z.coerce.number().int().min(1).max(10).default(10),
   MIN_TOKEN_LIQUIDITY_USD: z.coerce.number().finite().nonnegative().default(0),
   SOLANA_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(600).default(45),

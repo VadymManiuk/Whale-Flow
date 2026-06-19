@@ -22,7 +22,7 @@ interface V3Log extends LogBase { args: { amount0?: bigint; amount1?: bigint; };
 
 export interface EvmPollerOptions {
   chain: Extract<ChainId, "ethereum" | "base" | "bnb">; client: PublicClient; pools: DexPoolRepository;
-  processor: SwapProcessingService; redis: Redis; logger: Logger; intervalSeconds: number; initialBlockLookback: number; minLiquidityUsd: number; batchSize: number;
+  processor: SwapProcessingService; redis: Redis; logger: Logger; intervalSeconds: number; initialBlockLookback: number; minLiquidityUsd: number; batchSize: number; batchesPerCycle: number;
 }
 
 /** Batches pool addresses per event signature to stay within free-RPC limits. */
@@ -30,6 +30,7 @@ export class EvmWatchlistPoller {
   private timer: NodeJS.Timeout | undefined;
   private running = false;
   private cooldownUntil = 0;
+  private batchCursor = 0;
   private readonly metadata = new Map<string, PoolMetadata | null>();
   private readonly decimals = new Map<string, number | null>();
   public constructor(private readonly options: EvmPollerOptions) {}
@@ -41,7 +42,12 @@ export class EvmWatchlistPoller {
     try {
       const [targets, latestBlock] = await Promise.all([this.options.pools.listEnabled(this.options.chain), this.options.client.getBlockNumber()]);
       const groups = this.groupsFor(targets);
-      for (const batch of chunk(groups, this.options.batchSize)) await this.pollBatch(batch, latestBlock);
+      const batches = chunk(groups, this.options.batchSize);
+      for (let index = 0; index < Math.min(this.options.batchesPerCycle, batches.length); index += 1) {
+        const batch = batches[this.batchCursor % batches.length];
+        this.batchCursor += 1;
+        await this.pollBatch(batch, latestBlock);
+      }
     } catch (error) {
       if (isRateLimited(error)) { this.cooldownUntil = Date.now() + 60_000; this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry"); }
       else this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
