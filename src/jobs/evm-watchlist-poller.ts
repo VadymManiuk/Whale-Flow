@@ -1,4 +1,4 @@
-import { isAddress, parseAbiItem, formatUnits, type Address, type PublicClient } from "viem";
+import { formatUnits, isAddress, parseAbiItem, type Address, type PublicClient } from "viem";
 import type { Redis } from "ioredis";
 import type { WatchlistRepository } from "../db/repositories.js";
 import type { ChainId } from "../models/chain.js";
@@ -13,175 +13,111 @@ const token0Abi = parseAbiItem("function token0() view returns (address)");
 const token1Abi = parseAbiItem("function token1() view returns (address)");
 const decimalsAbi = parseAbiItem("function decimals() view returns (uint8)");
 
-interface BaseLog { transactionHash?: `0x${string}`; blockNumber?: bigint; }
-interface V2Log extends BaseLog { args: { amount0In?: bigint; amount1In?: bigint; amount0Out?: bigint; amount1Out?: bigint; }; }
-interface V3Log extends BaseLog { args: { amount0?: bigint; amount1?: bigint; }; }
+interface PoolTarget { token: string; market: TokenMarketData; }
+interface PoolGroup { pool: Address; targets: PoolTarget[]; }
+interface PoolMetadata { token0: Address; token1: Address; }
+interface LogBase { transactionHash?: `0x${string}`; blockNumber?: bigint; address: Address; }
+interface V2Log extends LogBase { args: { amount0In?: bigint; amount1In?: bigint; amount0Out?: bigint; amount1Out?: bigint; }; }
+interface V3Log extends LogBase { args: { amount0?: bigint; amount1?: bigint; }; }
 
 export interface EvmPollerOptions {
-  chain: Extract<ChainId, "ethereum" | "base" | "bnb">;
-  client: PublicClient;
-  watchlists: WatchlistRepository;
-  prices: DexScreenerClient;
-  processor: SwapProcessingService;
-  redis: Redis;
-  logger: Logger;
-  intervalSeconds: number;
-  initialBlockLookback: number;
-  minLiquidityUsd: number;
+  chain: Extract<ChainId, "ethereum" | "base" | "bnb">; client: PublicClient; watchlists: WatchlistRepository; prices: DexScreenerClient;
+  processor: SwapProcessingService; redis: Redis; logger: Logger; intervalSeconds: number; initialBlockLookback: number; minLiquidityUsd: number; batchSize: number;
 }
 
-/** Polls every discovered DEX Screener pool for each enabled EVM watchlist token. */
+/** Batches pool addresses per event signature to stay within free-RPC limits. */
 export class EvmWatchlistPoller {
   private timer: NodeJS.Timeout | undefined;
   private running = false;
   private cooldownUntil = 0;
+  private readonly metadata = new Map<string, PoolMetadata | null>();
+  private readonly decimals = new Map<string, number | null>();
   public constructor(private readonly options: EvmPollerOptions) {}
-
-  public start(): void {
-    if (this.timer) return;
-    void this.poll();
-    this.timer = setInterval(() => void this.poll(), this.options.intervalSeconds * 1_000);
-  }
-  public stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = undefined;
-  }
-
+  public start(): void { if (!this.timer) { void this.poll(); this.timer = setInterval(() => void this.poll(), this.options.intervalSeconds * 1_000); } }
+  public stop(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
   private async poll(): Promise<void> {
-    if (this.running) return;
-    if (Date.now() < this.cooldownUntil) return;
+    if (this.running || Date.now() < this.cooldownUntil) return;
     this.running = true;
     try {
-      const tokens = await this.options.watchlists.listEnabledTokens(this.options.chain);
-      const latestBlock = await this.options.client.getBlockNumber();
-      for (const token of tokens) {
-        try {
-          await this.pollToken(token.address, latestBlock);
-        } catch (error) {
-          if (isRateLimited(error)) throw error;
-          this.options.logger.warn({ err: error, chain: this.options.chain, token: token.address }, "EVM token polling skipped after a recoverable error");
-        }
-      }
+      const [tokens, latestBlock] = await Promise.all([this.options.watchlists.listEnabledTokens(this.options.chain), this.options.client.getBlockNumber()]);
+      const groups = await this.groupsFor(tokens.map((token) => token.address));
+      for (const batch of chunk(groups, this.options.batchSize)) await this.pollBatch(batch, latestBlock);
     } catch (error) {
-      if (isRateLimited(error)) {
-        this.cooldownUntil = Date.now() + 60_000;
-        this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry");
-      } else {
-        this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
-      }
-    } finally {
-      this.running = false;
-    }
+      if (isRateLimited(error)) { this.cooldownUntil = Date.now() + 60_000; this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60 }, "EVM RPC rate limited; scanner paused before retry"); }
+      else this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
+    } finally { this.running = false; }
   }
-
-  private async pollToken(tokenAddress: string, latestBlock: bigint): Promise<void> {
-    if (!isAddress(tokenAddress)) return;
-    const pools = await this.options.prices.getTokenPools(this.options.chain, tokenAddress);
-    for (const pool of pools) {
-      if (!isAddress(pool.poolAddress) || (pool.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
+  private async groupsFor(tokens: string[]): Promise<PoolGroup[]> {
+    const groups = new Map<string, PoolGroup>();
+    for (const token of tokens) {
+      if (!isAddress(token)) continue;
       try {
-        await this.pollPool(tokenAddress, pool, latestBlock);
-      } catch (error) {
-        if (isRateLimited(error)) throw error;
-        this.options.logger.warn({ err: error, chain: this.options.chain, token: tokenAddress, pool: pool.poolAddress }, "EVM pool polling skipped after a recoverable error");
-      }
+        for (const market of await this.options.prices.getTokenPools(this.options.chain, token)) {
+          if (!isAddress(market.poolAddress) || (market.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
+          const key = market.poolAddress.toLowerCase();
+          const group = groups.get(key) ?? { pool: market.poolAddress as Address, targets: [] };
+          group.targets.push({ token, market }); groups.set(key, group);
+        }
+      } catch (error) { this.options.logger.warn({ err: error, chain: this.options.chain, token }, "Skipping token with unavailable pool data"); }
     }
+    return [...groups.values()];
   }
-  private async pollPool(tokenAddress: string, market: TokenMarketData, latestBlock: bigint): Promise<void> {
-    const cursorKey = `whale-flow:cursor:evm:${this.options.chain}:${market.poolAddress.toLowerCase()}`;
-    const previous = await this.options.redis.get(cursorKey);
-    const requestedStart = previous ? BigInt(previous) + 1n : latestBlock - BigInt(this.options.initialBlockLookback - 1);
-    // Alchemy Free limits eth_getLogs to ten blocks. A live monitor prioritizes
-    // current events after a long outage rather than failing every poll forever.
-    const fromBlock = requestedStart < latestBlock - 9n ? latestBlock - 9n : requestedStart;
-    if (fromBlock > latestBlock) return;
-    const pool = market.poolAddress as Address;
-    const [token0, token1, decimals] = await Promise.all([
-      this.options.client.readContract({ address: pool, abi: [token0Abi], functionName: "token0" }),
-      this.options.client.readContract({ address: pool, abi: [token1Abi], functionName: "token1" }),
-      this.options.client.readContract({ address: tokenAddress as Address, abi: [decimalsAbi], functionName: "decimals" })
-    ]);
-    const trackedIsToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
-    if (!trackedIsToken0 && token1.toLowerCase() !== tokenAddress.toLowerCase()) return;
+  private async pollBatch(groups: PoolGroup[], latestBlock: bigint): Promise<void> {
+    const usable: Array<{ group: PoolGroup; metadata: PoolMetadata }> = [];
+    for (const group of groups) {
+      const metadata = await this.poolMetadata(group.pool);
+      if (metadata) usable.push({ group, metadata });
+    }
+    if (usable.length === 0) return;
+    const fromBlock = latestBlock - BigInt(Math.min(9, this.options.initialBlockLookback - 1));
+    const addresses = usable.map(({ group }) => group.pool);
     const [v2Logs, v3Logs] = await Promise.all([
-      this.options.client.getLogs({ address: pool, event: v2Swap, fromBlock, toBlock: latestBlock }),
-      this.options.client.getLogs({ address: pool, event: v3Swap, fromBlock, toBlock: latestBlock })
+      this.options.client.getLogs({ address: addresses, event: v2Swap, fromBlock, toBlock: latestBlock }),
+      this.options.client.getLogs({ address: addresses, event: v3Swap, fromBlock, toBlock: latestBlock })
     ]);
-    const transactionWallets = new Map<string, Address>();
-    const blockTimes = new Map<bigint, Date>();
-    for (const log of v2Logs) {
-      if (!log.transactionHash || !log.blockNumber) continue;
-      const wallet = await this.walletFor(log.transactionHash, transactionWallets);
-      if (!wallet) continue;
-      const timestamp = await this.timestampFor(log.blockNumber, blockTimes);
-      const swap = this.fromV2({ args: log.args, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, tokenAddress, market, trackedIsToken0, decimals, wallet, timestamp);
-      if (swap) await this.options.processor.process(swap);
-    }
-    for (const log of v3Logs) {
-      if (!log.transactionHash || !log.blockNumber) continue;
-      const wallet = await this.walletFor(log.transactionHash, transactionWallets);
-      if (!wallet) continue;
-      const timestamp = await this.timestampFor(log.blockNumber, blockTimes);
-      const swap = this.fromV3({ args: log.args, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, tokenAddress, market, trackedIsToken0, decimals, wallet, timestamp);
-      if (swap) await this.options.processor.process(swap);
-    }
-    await this.options.redis.set(cursorKey, latestBlock.toString(), "EX", 86_400);
+    const byPool = new Map(usable.map((entry) => [entry.group.pool.toLowerCase(), entry]));
+    const wallets = new Map<string, Address>(); const times = new Map<bigint, Date>();
+    for (const log of v2Logs) await this.processV2({ args: log.args, address: log.address, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, byPool, wallets, times);
+    for (const log of v3Logs) await this.processV3({ args: log.args, address: log.address, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, byPool, wallets, times);
+    await Promise.all(usable.map(({ group }) => this.options.redis.set(`whale-flow:cursor:evm:${this.options.chain}:${group.pool.toLowerCase()}`, latestBlock.toString(), "EX", 86_400)));
   }
-
-  private async walletFor(hash: `0x${string}`, cache: Map<string, Address>): Promise<Address | null> {
-    const existing = cache.get(hash);
-    if (existing) return existing;
-    try {
-      const wallet = (await this.options.client.getTransaction({ hash })).from;
-      cache.set(hash, wallet);
-      return wallet;
-    } catch (error) {
-      this.options.logger.warn({ err: error, hash }, "Unable to resolve EVM transaction initiator");
-      return null;
+  private async processV2(log: V2Log, pools: Map<string, { group: PoolGroup; metadata: PoolMetadata }>, wallets: Map<string, Address>, times: Map<bigint, Date>): Promise<void> {
+    const entry = pools.get(log.address.toLowerCase()); if (!entry || !log.transactionHash || !log.blockNumber) return;
+    const [wallet, timestamp] = await Promise.all([this.walletFor(log.transactionHash, wallets), this.timestampFor(log.blockNumber, times)]); if (!wallet) return;
+    for (const target of entry.group.targets) {
+      const decimals = await this.tokenDecimals(target.token); if (decimals === null) continue;
+      const isToken0 = entry.metadata.token0.toLowerCase() === target.token.toLowerCase();
+      const input = isToken0 ? log.args.amount0In : log.args.amount1In; const output = isToken0 ? log.args.amount0Out : log.args.amount1Out;
+      const amount = output && output > 0n ? output : input; if (!amount) continue;
+      await this.options.processor.process(this.swap(target, wallet, log.transactionHash, log.blockNumber, timestamp, amount, decimals, output && output > 0n ? "BUY" : "SELL"));
     }
   }
-  private async timestampFor(blockNumber: bigint, cache: Map<bigint, Date>): Promise<Date> {
-    const existing = cache.get(blockNumber);
-    if (existing) return existing;
-    const timestamp = new Date(Number((await this.options.client.getBlock({ blockNumber })).timestamp) * 1_000);
-    cache.set(blockNumber, timestamp);
-    return timestamp;
+  private async processV3(log: V3Log, pools: Map<string, { group: PoolGroup; metadata: PoolMetadata }>, wallets: Map<string, Address>, times: Map<bigint, Date>): Promise<void> {
+    const entry = pools.get(log.address.toLowerCase()); if (!entry || !log.transactionHash || !log.blockNumber) return;
+    const [wallet, timestamp] = await Promise.all([this.walletFor(log.transactionHash, wallets), this.timestampFor(log.blockNumber, times)]); if (!wallet) return;
+    for (const target of entry.group.targets) {
+      const decimals = await this.tokenDecimals(target.token); if (decimals === null) continue;
+      const amount = entry.metadata.token0.toLowerCase() === target.token.toLowerCase() ? log.args.amount0 : log.args.amount1;
+      if (amount === undefined || amount === 0n) continue;
+      await this.options.processor.process(this.swap(target, wallet, log.transactionHash, log.blockNumber, timestamp, amount < 0n ? -amount : amount, decimals, amount < 0n ? "BUY" : "SELL"));
+    }
   }
-  private fromV2(log: V2Log, token: string, market: TokenMarketData, isToken0: boolean, decimals: number, wallet: Address, timestamp: Date): NormalizedSwap | null {
-    const input = isToken0 ? log.args.amount0In : log.args.amount1In;
-    const output = isToken0 ? log.args.amount0Out : log.args.amount1Out;
-    const rawAmount = output && output > 0n ? output : input;
-    if (!rawAmount || !log.transactionHash) return null;
-    return this.swap({ token, market, wallet, txHash: log.transactionHash, blockNumber: log.blockNumber, timestamp, amount: rawAmount, decimals, direction: output && output > 0n ? "BUY" : "SELL" });
+  private swap(target: PoolTarget, wallet: Address, txHash: `0x${string}`, blockNumber: bigint, timestamp: Date, amount: bigint, decimals: number, direction: "BUY" | "SELL"): NormalizedSwap {
+    const tokenAmount = Number(formatUnits(amount, decimals));
+    return { chain: this.options.chain, txHash, blockNumber: Number(blockNumber), timestamp, wallet, tokenAddress: target.token, tokenSymbol: target.market.symbol, direction, tokenAmount, usdValue: target.market.priceUsd === null ? null : tokenAmount * target.market.priceUsd, quoteTokenAddress: target.market.quoteTokenAddress, quoteTokenSymbol: target.market.quoteTokenSymbol, dexName: "DEX Screener pool", poolAddress: target.market.poolAddress, priceUsd: target.market.priceUsd };
   }
-  private fromV3(log: V3Log, token: string, market: TokenMarketData, isToken0: boolean, decimals: number, wallet: Address, timestamp: Date): NormalizedSwap | null {
-    const amount = isToken0 ? log.args.amount0 : log.args.amount1;
-    if (amount === undefined || amount === 0n || !log.transactionHash) return null;
-    // A positive V3 amount means the pool received tracked token (wallet sold).
-    return this.swap({ token, market, wallet, txHash: log.transactionHash, blockNumber: log.blockNumber, timestamp, amount: amount < 0n ? -amount : amount, decimals, direction: amount < 0n ? "BUY" : "SELL" });
+  private async poolMetadata(pool: Address): Promise<PoolMetadata | null> {
+    const key = pool.toLowerCase(); if (this.metadata.has(key)) return this.metadata.get(key)!;
+    try { const [token0, token1] = await Promise.all([this.options.client.readContract({ address: pool, abi: [token0Abi], functionName: "token0" }), this.options.client.readContract({ address: pool, abi: [token1Abi], functionName: "token1" })]); const value = { token0, token1 }; this.metadata.set(key, value); return value; }
+    catch { this.metadata.set(key, null); return null; }
   }
-  private swap(input: { token: string; market: TokenMarketData; wallet: Address; txHash: `0x${string}`; blockNumber?: bigint; timestamp: Date; amount: bigint; decimals: number; direction: "BUY" | "SELL" }): NormalizedSwap {
-    const tokenAmount = Number(formatUnits(input.amount, input.decimals));
-    return {
-      chain: this.options.chain,
-      txHash: input.txHash,
-      blockNumber: input.blockNumber ? Number(input.blockNumber) : undefined,
-      timestamp: input.timestamp,
-      wallet: input.wallet,
-      tokenAddress: input.token,
-      tokenSymbol: input.market.symbol,
-      direction: input.direction,
-      tokenAmount,
-      usdValue: input.market.priceUsd === null ? null : tokenAmount * input.market.priceUsd,
-      quoteTokenAddress: input.market.quoteTokenAddress,
-      quoteTokenSymbol: input.market.quoteTokenSymbol,
-      dexName: "DEX Screener pool",
-      poolAddress: input.market.poolAddress,
-      priceUsd: input.market.priceUsd
-    };
+  private async tokenDecimals(token: string): Promise<number | null> {
+    const key = token.toLowerCase(); if (this.decimals.has(key)) return this.decimals.get(key)!;
+    try { const value = await this.options.client.readContract({ address: token as Address, abi: [decimalsAbi], functionName: "decimals" }); this.decimals.set(key, value); return value; }
+    catch { this.decimals.set(key, null); return null; }
   }
+  private async walletFor(hash: `0x${string}`, cache: Map<string, Address>): Promise<Address | null> { const cached = cache.get(hash); if (cached) return cached; try { const wallet = (await this.options.client.getTransaction({ hash })).from; cache.set(hash, wallet); return wallet; } catch { return null; } }
+  private async timestampFor(block: bigint, cache: Map<bigint, Date>): Promise<Date> { const cached = cache.get(block); if (cached) return cached; const timestamp = new Date(Number((await this.options.client.getBlock({ blockNumber: block })).timestamp) * 1_000); cache.set(block, timestamp); return timestamp; }
 }
-
-function isRateLimited(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "status" in error && error.status === 429;
-}
+function chunk<T>(items: T[], size: number): T[][] { return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size)); }
+function isRateLimited(error: unknown): boolean { return typeof error === "object" && error !== null && "status" in error && error.status === 429; }
