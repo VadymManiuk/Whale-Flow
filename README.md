@@ -10,7 +10,7 @@ Alert-only monitoring MVP for repeated whale buying and selling across Ethereum,
 - Prisma persistence for swaps, wallet snapshots, alerts, tokens, and wallets.
 - Telegram notifier and a real Telegram connection test (when credentials are configured).
 - Watchlist CLI commands and chain-adapter boundaries for EVM and Solana.
-- Live polling for the highest-liquidity V2/V3 pool of each EVM watchlist token when an RPC URL is configured.
+- Live polling for the highest-liquidity V2/V3 pool of each EVM watchlist token when an RPC URL is configured, plus Helius polling for explicit Solana wallet/token watchlists.
 - DEX Screener client with response validation, retry, and timeout.
 
 ## Setup
@@ -48,7 +48,7 @@ docker compose exec -T app node dist/cli.js token:add --chain base --address 0x.
 
 ## Current live-data boundary
 
-EVM polling is active once an EVM RPC URL and a watchlist token are configured. Solana remains a safe skeleton and emits no fabricated swaps. Before full multi-chain live alerts can be sent:
+EVM polling is active once an EVM RPC URL and a watchlist token are configured. Solana polling is active once a Helius key, a watched wallet, and a watched token are configured. Before full multi-chain live alerts can be sent:
 
 1. Helius enhanced-transaction ingestion and Solana swap normalization.
 2. Router, pool, CEX, and MEV filtering beyond using the initiating EOA.

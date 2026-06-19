@@ -14,6 +14,7 @@ import { AdapterWalletValueProvider } from "./services/wallet-value-provider.js"
 import { createLogger } from "./utils/logger.js";
 import { DexScreenerClient } from "./integrations/price/dexscreener-client.js";
 import { EvmWatchlistPoller } from "./jobs/evm-watchlist-poller.js";
+import { SolanaWalletPoller } from "./jobs/solana-wallet-poller.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -46,7 +47,7 @@ async function main(): Promise<void> {
   await prisma.$connect();
   await redis.ping();
   await Promise.all([...adapters.values()].map((adapter) => adapter.start()));
-  const pollers = (["ethereum", "base", "bnb"] as const).flatMap((chain) => {
+  const pollers: Array<{ stop(): void }> = (["ethereum", "base", "bnb"] as const).flatMap((chain) => {
     const adapter = adapters.get(chain);
     if (!(adapter instanceof EvmAdapter) || !adapter.client) return [];
     const poller = new EvmWatchlistPoller({
@@ -64,6 +65,11 @@ async function main(): Promise<void> {
     poller.start();
     return [poller];
   });
+  if (config.HELIUS_API_KEY) {
+    const poller = new SolanaWalletPoller(config.HELIUS_API_KEY, watchlists, prices, processor, redis, logger, config.SOLANA_POLL_INTERVAL_SECONDS);
+    poller.start();
+    pollers.push(poller);
+  }
   logger.info({ adapters: adapters.size, pollers: pollers.length, telegramEnabled: Boolean(config.TELEGRAM_BOT_TOKEN) }, "Whale Flow started");
 
   const shutdown = async (signal: string): Promise<void> => {
