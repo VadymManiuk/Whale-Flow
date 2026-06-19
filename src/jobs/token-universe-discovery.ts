@@ -15,7 +15,8 @@ export class TokenUniverseDiscovery {
   private async run(): Promise<void> {
     try {
       const tokens = await this.client.discoverTokens(this.minMarketCapUsd);
-      await Promise.all(tokens.map((token) => this.watchlists.addToken(token)));
+      for (const token of tokens) await this.watchlists.addToken({ ...token, autoDiscovered: true });
+      await this.watchlists.disableStaleAutoDiscoveredTokens(tokens);
       this.logger.info({ discoveredTokens: tokens.length, minMarketCapUsd: this.minMarketCapUsd }, "Token universe discovery completed");
     } catch (error) {
       this.logger.error({ err: error }, "Token universe discovery failed");

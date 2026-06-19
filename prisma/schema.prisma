@@ -91,6 +91,7 @@ model WatchlistToken {
   tokenAddress                    String
   symbol                          String?
   enabled                         Boolean  @default(true)
+  autoDiscovered                  Boolean  @default(false)
   minWalletTokenValueUsd          Float?
   minWalletStableOrNativeValueUsd Float?
   createdAt                       DateTime @default(now())

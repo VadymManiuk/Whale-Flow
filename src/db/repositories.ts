@@ -61,11 +61,11 @@ export class AlertRepository {
 
 export class WatchlistRepository {
   public constructor(private readonly prisma: PrismaClient) {}
-  public async addToken(input: { chain: ChainId; address: string; symbol?: string }): Promise<void> {
+  public async addToken(input: { chain: ChainId; address: string; symbol?: string; autoDiscovered?: boolean }): Promise<void> {
     await this.prisma.watchlistToken.upsert({
       where: { chain_tokenAddress: { chain: input.chain, tokenAddress: input.address } },
-      create: { chain: input.chain, tokenAddress: input.address, symbol: input.symbol },
-      update: { symbol: input.symbol, enabled: true }
+      create: { chain: input.chain, tokenAddress: input.address, symbol: input.symbol, autoDiscovered: input.autoDiscovered ?? false },
+      update: { symbol: input.symbol, enabled: true, autoDiscovered: input.autoDiscovered ?? false }
     });
   }
   public async addWallet(input: { chain: ChainId; wallet: string; label?: string }): Promise<void> {
@@ -85,6 +85,13 @@ export class WatchlistRepository {
     return this.prisma.watchlistWallet.findMany({
       where: { chain, enabled: true },
       select: { wallet: true, label: true }
+    });
+  }
+  public async disableStaleAutoDiscoveredTokens(tokens: ReadonlyArray<{ chain: ChainId; address: string }>): Promise<void> {
+    const active = tokens.map((token) => ({ chain: token.chain, tokenAddress: token.address }));
+    await this.prisma.watchlistToken.updateMany({
+      where: active.length === 0 ? { autoDiscovered: true } : { autoDiscovered: true, NOT: { OR: active } },
+      data: { enabled: false }
     });
   }
 }

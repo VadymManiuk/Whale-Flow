@@ -28,17 +28,21 @@ export interface TokenMarketData {
 }
 
 export class DexScreenerClient {
+  private readonly poolCache = new Map<string, { expiresAt: number; pools: TokenMarketData[] }>();
   public constructor(private readonly apiBase: string) {}
   public async getTokenMarketData(chain: ChainId, tokenAddress: string): Promise<TokenMarketData | null> {
     return (await this.getTokenPools(chain, tokenAddress))[0] ?? null;
   }
   public async getTokenPools(chain: ChainId, tokenAddress: string): Promise<TokenMarketData[]> {
+    const cacheKey = `${chain}:${tokenAddress.toLowerCase()}`;
+    const cached = this.poolCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.pools;
     const response = await withRetry(async () => fetch(`${this.apiBase}/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`));
     if (!response.ok) throw new Error(`DEX Screener returned HTTP ${response.status}`);
     const payload = responseSchema.parse(await response.json());
     const pairs = payload.pairs?.filter((item) => item.chainId === dexScreenerChainId(chain) && [item.baseToken.address, item.quoteToken.address].some((address) => address.toLowerCase() === tokenAddress.toLowerCase())) ?? [];
     const uniquePools = new Set<string>();
-    return pairs
+    const pools = pairs
       .sort((left, right) => (right.liquidity?.usd ?? 0) - (left.liquidity?.usd ?? 0))
       .filter((pair) => !uniquePools.has(pair.pairAddress.toLowerCase()) && (uniquePools.add(pair.pairAddress.toLowerCase()) || true))
       .map((pair) => {
@@ -54,6 +58,8 @@ export class DexScreenerClient {
           quoteTokenSymbol: trackedIsBase ? pair.quoteToken.symbol : pair.baseToken.symbol
         };
       });
+    this.poolCache.set(cacheKey, { pools, expiresAt: Date.now() + 5 * 60_000 });
+    return pools;
   }
 }
 

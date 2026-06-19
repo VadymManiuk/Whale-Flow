@@ -30,7 +30,7 @@ export interface EvmPollerOptions {
   minLiquidityUsd: number;
 }
 
-/** Polls the most liquid DEX Screener pool for every enabled watchlist token. */
+/** Polls every discovered DEX Screener pool for each enabled EVM watchlist token. */
 export class EvmWatchlistPoller {
   private timer: NodeJS.Timeout | undefined;
   private running = false;
@@ -51,7 +51,14 @@ export class EvmWatchlistPoller {
     this.running = true;
     try {
       const tokens = await this.options.watchlists.listEnabledTokens(this.options.chain);
-      for (const token of tokens) await this.pollToken(token.address);
+      const latestBlock = await this.options.client.getBlockNumber();
+      for (const token of tokens) {
+        try {
+          await this.pollToken(token.address, latestBlock);
+        } catch (error) {
+          this.options.logger.warn({ err: error, chain: this.options.chain, token: token.address }, "EVM token polling skipped after a recoverable error");
+        }
+      }
     } catch (error) {
       this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
     } finally {
@@ -59,16 +66,19 @@ export class EvmWatchlistPoller {
     }
   }
 
-  private async pollToken(tokenAddress: string): Promise<void> {
+  private async pollToken(tokenAddress: string, latestBlock: bigint): Promise<void> {
     if (!isAddress(tokenAddress)) return;
     const pools = await this.options.prices.getTokenPools(this.options.chain, tokenAddress);
     for (const pool of pools) {
       if (!isAddress(pool.poolAddress) || (pool.liquidityUsd ?? 0) < this.options.minLiquidityUsd) continue;
-      await this.pollPool(tokenAddress, pool);
+      try {
+        await this.pollPool(tokenAddress, pool, latestBlock);
+      } catch (error) {
+        this.options.logger.warn({ err: error, chain: this.options.chain, token: tokenAddress, pool: pool.poolAddress }, "EVM pool polling skipped after a recoverable error");
+      }
     }
   }
-  private async pollPool(tokenAddress: string, market: TokenMarketData): Promise<void> {
-    const latestBlock = await this.options.client.getBlockNumber();
+  private async pollPool(tokenAddress: string, market: TokenMarketData, latestBlock: bigint): Promise<void> {
     const cursorKey = `whale-flow:cursor:evm:${this.options.chain}:${market.poolAddress.toLowerCase()}`;
     const previous = await this.options.redis.get(cursorKey);
     const requestedStart = previous ? BigInt(previous) + 1n : latestBlock - BigInt(this.options.initialBlockLookback - 1);
