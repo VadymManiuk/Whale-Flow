@@ -90,15 +90,19 @@ export class EvmWatchlistPoller {
       ? initialFromBlock
       : cursors.reduce((oldest, cursor) => cursor < oldest ? cursor : oldest) + 1n;
     if (fromBlock > latestBlock) return;
+    // Alchemy Free accepts at most ten blocks per eth_getLogs request. Advance
+    // the cursor in bounded chunks so a slow round-robin scan catches up over
+    // subsequent polls instead of issuing an invalid oversized request.
+    const toBlock = minBlock(latestBlock, fromBlock + BigInt(this.options.initialBlockLookback - 1));
     const [v2Logs, v3Logs] = await Promise.all([
-      this.options.client.getLogs({ address: addresses, event: v2Swap, fromBlock, toBlock: latestBlock }),
-      this.options.client.getLogs({ address: addresses, event: v3Swap, fromBlock, toBlock: latestBlock })
+      this.options.client.getLogs({ address: addresses, event: v2Swap, fromBlock, toBlock }),
+      this.options.client.getLogs({ address: addresses, event: v3Swap, fromBlock, toBlock })
     ]);
     const byPool = new Map(usable.map((entry) => [entry.group.pool.toLowerCase(), entry]));
     const wallets = new Map<string, Address>(); const times = new Map<bigint, Date>();
     for (const log of v2Logs) await this.processV2({ args: log.args, address: log.address, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, byPool, wallets, times);
     for (const log of v3Logs) await this.processV3({ args: log.args, address: log.address, transactionHash: log.transactionHash, blockNumber: log.blockNumber }, byPool, wallets, times);
-    await Promise.all(addresses.map((pool) => this.options.redis.set(this.cursorKey(pool), latestBlock.toString(), "EX", 86_400)));
+    await Promise.all(addresses.map((pool) => this.options.redis.set(this.cursorKey(pool), toBlock.toString(), "EX", 86_400)));
   }
   private async processV2(log: V2Log, pools: Map<string, { group: PoolGroup; metadata: PoolMetadata }>, wallets: Map<string, Address>, times: Map<bigint, Date>): Promise<void> {
     const entry = pools.get(log.address.toLowerCase()); if (!entry || !log.transactionHash || !log.blockNumber) return;
@@ -155,4 +159,5 @@ export class EvmWatchlistPoller {
   }
 }
 function chunk<T>(items: T[], size: number): T[][] { return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size)); }
+function minBlock(left: bigint, right: bigint): bigint { return left < right ? left : right; }
 function isRateLimited(error: unknown): boolean { return typeof error === "object" && error !== null && "status" in error && error.status === 429; }
