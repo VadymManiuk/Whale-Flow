@@ -16,10 +16,7 @@ const nativePriceToken: Record<Extract<ChainId, "ethereum" | "base" | "bnb">, Ad
   bnb: "0xBB4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 };
 
-/**
- * Adapter boundary for Ethereum, Base, and BNB. Swap log decoding is deliberately
- * not enabled yet: providers and pool selection must be configured per DEX.
- */
+/** Adapter for EVM wallet valuation; pool swap logs are decoded by EvmWatchlistPoller. */
 export class EvmAdapter implements ChainAdapter {
   public readonly client: PublicClient | undefined;
   public constructor(
@@ -29,13 +26,13 @@ export class EvmAdapter implements ChainAdapter {
     private readonly logger: Logger,
     private readonly prices: DexScreenerClient
   ) {
-    // Live RPC is optional while this adapter is a polling skeleton. Creating a
-    // viem transport with no URL throws during application startup.
+    // Live RPC is optional. Creating a viem transport with no URL throws during
+    // application startup, while individual chains can remain disabled.
     this.client = rpcUrl ? createPublicClient({ transport: http(rpcUrl) }) : undefined;
   }
 
   public async start(): Promise<void> {
-    this.logger.info({ chain: this.chainId, rpcConfigured: Boolean(this.client) }, "EVM adapter is configured as a watchlist polling skeleton; live DEX decoding is not enabled");
+    this.logger.info({ chain: this.chainId, rpcConfigured: Boolean(this.client) }, "EVM wallet valuation is configured for live pool polling");
   }
   public async stop(): Promise<void> { this.logger.info({ chain: this.chainId }, "EVM adapter stopped"); }
   public async getWalletTokenBalanceUsd(wallet: string, token: string): Promise<number | null> {

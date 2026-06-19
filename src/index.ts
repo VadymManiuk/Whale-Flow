@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     ["ethereum", new EvmAdapter("ethereum", "Ethereum", config.ALCHEMY_ETHEREUM_RPC_URL, logger, prices)],
     ["base", new EvmAdapter("base", "Base", config.ALCHEMY_BASE_RPC_URL, logger, prices)],
     ["bnb", new EvmAdapter("bnb", "BNB Chain", config.BNB_RPC_URL, logger, prices)],
-    ["solana", new SolanaAdapter(config.HELIUS_API_KEY, logger)]
+    ["solana", new SolanaAdapter(config.HELIUS_API_KEY, logger, prices)]
   ]);
   const detector = new GradualWhaleFlowDetector({
     minRepeatingSwaps: config.MIN_REPEATING_SWAPS,
