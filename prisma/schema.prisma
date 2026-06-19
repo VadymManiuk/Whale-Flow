@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Chain {
+  ethereum
+  base
+  bnb
+  solana
+}
+
+enum SwapDirection {
+  BUY
+  SELL
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Swap {
+  id                String        @id @default(cuid())
+  chain             Chain
+  txHash            String
+  blockNumber       BigInt?
+  slot              BigInt?
+  timestamp         DateTime
+  wallet            String
+  tokenAddress      String
+  tokenSymbol       String?
+  direction         SwapDirection
+  tokenAmount       Float
+  usdValue          Float?
+  quoteTokenAddress String?
+  quoteTokenSymbol  String?
+  dexName           String?
+  poolAddress       String?
+  priceUsd          Float?
+  createdAt         DateTime      @default(now())
+
+  @@unique([chain, txHash, wallet, tokenAddress, direction])
+  @@index([chain, wallet, tokenAddress, direction, timestamp])
+}
+
+model WalletSnapshot {
+  id                      String   @id @default(cuid())
+  chain                   Chain
+  wallet                  String
+  tokenAddress            String?
+  tokenSymbol             String?
+  tokenBalanceUsd         Float?
+  stableAndNativeBalanceUsd Float?
+  rawJson                 Json?
+  createdAt               DateTime @default(now())
+
+  @@index([chain, wallet, tokenAddress, createdAt])
+}
+
+model Alert {
+  id                String    @id @default(cuid())
+  type              String
+  chain             Chain
+  wallet            String
+  tokenAddress      String
+  tokenSymbol       String?
+  direction         SwapDirection
+  severity          Severity
+  swapsCount        Int
+  totalUsdValue     Float
+  avgIntervalMinutes Float
+  firstSwapAt       DateTime
+  lastSwapAt        DateTime
+  message           String
+  telegramMessageId String?
+  createdAt         DateTime  @default(now())
+
+  @@index([chain, wallet, tokenAddress, direction, createdAt])
+}
+
+model WatchlistToken {
+  id                              String   @id @default(cuid())
+  chain                           Chain
+  tokenAddress                    String
+  symbol                          String?
+  enabled                         Boolean  @default(true)
+  minWalletTokenValueUsd          Float?
+  minWalletStableOrNativeValueUsd Float?
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  @@unique([chain, tokenAddress])
+}
+
+model WatchlistWallet {
+  id        String   @id @default(cuid())
+  chain     Chain
+  wallet    String
+  label     String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([chain, wallet])
+}
