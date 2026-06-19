@@ -18,10 +18,7 @@ export class CoinGeckoClient {
   public constructor(private readonly apiKey: string) {}
   public async discoverTokens(minMarketCapUsd: number): Promise<DiscoveredToken[]> {
     const headers = { "x-cg-demo-api-key": this.apiKey };
-    const [markets, coins] = await Promise.all([
-      this.getJson("/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false", headers, marketSchema),
-      this.getJson("/coins/list?include_platform=true", headers, coinListSchema)
-    ]);
+    const [markets, coins] = await Promise.all([this.getMarketsAboveCap(minMarketCapUsd, headers), this.getJson("/coins/list?include_platform=true", headers, coinListSchema)]);
     const eligibleIds = new Set(markets.filter((coin) => (coin.market_cap ?? 0) >= minMarketCapUsd).map((coin) => coin.id));
     const seen = new Set<string>();
     const tokens: DiscoveredToken[] = [];
@@ -35,6 +32,15 @@ export class CoinGeckoClient {
       }
     }
     return tokens;
+  }
+  private async getMarketsAboveCap(minMarketCapUsd: number, headers: HeadersInit): Promise<Array<{ id: string; market_cap: number | null }>> {
+    const markets: Array<{ id: string; market_cap: number | null }> = [];
+    for (let page = 1; page <= 20; page += 1) {
+      const result = await this.getJson(`/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}&sparkline=false`, headers, marketSchema);
+      markets.push(...result);
+      if (result.length < 250 || (result.at(-1)?.market_cap ?? 0) < minMarketCapUsd) break;
+    }
+    return markets;
   }
   private async getJson<T>(path: string, headers: HeadersInit, schema: z.ZodType<T>): Promise<T> {
     const response = await withRetry(() => fetch(`https://api.coingecko.com/api/v3${path}`, { headers }));
