@@ -7,7 +7,7 @@ import type { DexScreenerClient } from "../../integrations/price/dexscreener-cli
 
 const stablecoins: Record<Extract<ChainId, "ethereum" | "base" | "bnb">, readonly Address[]> = {
   ethereum: ["0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "0xdAC17F958D2ee523a2206206994597C13D831ec7", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
-  base: ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xd9AAEC86B65D86f6A7B5F1b0C42FFA531710b6CA"],
+  base: ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "0xd9aaec86b65d86f6a7b5f1b0c42ffa531710b6ca"],
   bnb: ["0x55d398326f99059fF775485246999027B3197955", "0x8AC76a51cc950d9822d68b83fe1Ad97B32Cd580d"]
 };
 const nativePriceToken: Record<Extract<ChainId, "ethereum" | "base" | "bnb">, Address> = {
