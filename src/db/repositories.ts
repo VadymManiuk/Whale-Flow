@@ -7,9 +7,8 @@ import type { TokenMarketData } from "../integrations/price/dexscreener-client.j
 export class SwapRepository {
   public constructor(private readonly prisma: PrismaClient) {}
   public async createIfNew(swap: NormalizedSwap): Promise<boolean> {
-    try {
-      await this.prisma.swap.create({
-        data: {
+    const result = await this.prisma.swap.createMany({
+      data: [{
           chain: swap.chain,
           txHash: swap.txHash,
           blockNumber: swap.blockNumber,
@@ -26,13 +25,10 @@ export class SwapRepository {
           dexName: swap.dexName,
           poolAddress: swap.poolAddress,
           priceUsd: swap.priceUsd
-        }
-      });
-      return true;
-    } catch (error) {
-      if (isPrismaUniqueViolation(error)) return false;
-      throw error;
-    }
+      }],
+      skipDuplicates: true
+    });
+    return result.count === 1;
   }
 }
 
@@ -146,8 +142,4 @@ export class DexPoolRepository {
       }
     }));
   }
-}
-
-function isPrismaUniqueViolation(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
