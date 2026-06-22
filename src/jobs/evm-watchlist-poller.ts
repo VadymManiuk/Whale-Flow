@@ -54,7 +54,7 @@ export class EvmWatchlistPoller {
       }
       this.recordSuccessfulPoll();
     } catch (error) {
-      if (isRateLimited(error)) this.reduceBatchAfterRateLimit();
+      if (isRpcOverloaded(error)) this.reduceBatchAfterRateLimit();
       else this.options.logger.error({ err: error, chain: this.options.chain }, "EVM watchlist polling failed");
     } finally { this.running = false; }
   }
@@ -147,7 +147,7 @@ export class EvmWatchlistPoller {
     this.effectiveBatchSize = Math.max(10, Math.floor(previousBatchSize / 2));
     this.successfulPolls = 0;
     this.cooldownUntil = Date.now() + 60_000;
-    this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60, previousBatchSize, nextBatchSize: this.effectiveBatchSize }, "EVM RPC rate limited; scanner paused and batch reduced");
+    this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60, previousBatchSize, nextBatchSize: this.effectiveBatchSize }, "EVM RPC overloaded; scanner paused and batch reduced");
   }
   private recordSuccessfulPoll(): void {
     this.successfulPolls += 1;
@@ -160,4 +160,9 @@ export class EvmWatchlistPoller {
 }
 function chunk<T>(items: T[], size: number): T[][] { return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size)); }
 function minBlock(left: bigint, right: bigint): bigint { return left < right ? left : right; }
-function isRateLimited(error: unknown): boolean { return typeof error === "object" && error !== null && "status" in error && error.status === 429; }
+function isRpcOverloaded(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("status" in error && error.status === 429) return true;
+  if (!(error instanceof Error)) return false;
+  return /request timed out|took too long to respond|timeout/i.test(error.message);
+}
