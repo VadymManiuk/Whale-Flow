@@ -3,6 +3,7 @@ import type { AlertRepository, SwapRepository } from "../db/repositories.js";
 import { formatWhaleAlert } from "../integrations/telegram/format-alert.js";
 import type { TelegramNotifier } from "../integrations/telegram/telegram-notifier.js";
 import type { NormalizedSwap } from "../models/swap.js";
+import { isStablecoinBuy } from "../models/stablecoin.js";
 import type { Logger } from "../utils/logger.js";
 
 export class SwapProcessingService {
@@ -12,12 +13,17 @@ export class SwapProcessingService {
     private readonly alerts: AlertRepository,
     private readonly telegram: TelegramNotifier,
     private readonly logger: Logger,
-    private readonly alertCooldownMinutes: number
+    private readonly alertCooldownMinutes: number,
+    private readonly ignoreStablecoinBuys: boolean
   ) {}
 
   public async process(swap: NormalizedSwap): Promise<void> {
     if (!(await this.swaps.createIfNew(swap))) {
       this.logger.debug({ txHash: swap.txHash, chain: swap.chain }, "Duplicate swap ignored by database");
+      return;
+    }
+    if (this.ignoreStablecoinBuys && isStablecoinBuy(swap)) {
+      this.logger.debug({ chain: swap.chain, token: swap.tokenSymbol, txHash: swap.txHash }, "Stablecoin buy ignored for alert detection");
       return;
     }
     const result = await this.detector.process(swap);

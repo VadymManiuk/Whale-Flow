@@ -9,6 +9,12 @@ const booleanFromEnvironment = z.preprocess((value) => {
   if (value === "false") return false;
   return value;
 }, z.boolean());
+const booleanTrueByDefault = z.preprocess((value) => {
+  if (value === undefined || value === "") return true;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}, z.boolean());
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -31,6 +37,7 @@ const schema = z.object({
   ROLLING_WINDOW_MINUTES: z.coerce.number().finite().positive().default(120),
   MIN_SWAP_USD_VALUE: z.coerce.number().finite().nonnegative().default(5_000),
   ALERT_COOLDOWN_MINUTES: z.coerce.number().finite().nonnegative().default(60),
+  IGNORE_STABLECOIN_BUYS: booleanTrueByDefault,
   EVM_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(300).default(20),
   EVM_POOL_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
   EVM_BATCHES_PER_CYCLE: z.coerce.number().int().min(1).max(10).default(1),

@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   // soon as live polling is implemented. It never signs or submits transactions.
   const watchlists = new WatchlistRepository(prisma);
   const pools = new DexPoolRepository(prisma);
-  const processor = new SwapProcessingService(new SwapRepository(prisma), detector, new AlertRepository(prisma), createTelegramNotifier(config), logger, config.ALERT_COOLDOWN_MINUTES);
+  const processor = new SwapProcessingService(new SwapRepository(prisma), detector, new AlertRepository(prisma), createTelegramNotifier(config), logger, config.ALERT_COOLDOWN_MINUTES, config.IGNORE_STABLECOIN_BUYS);
 
   await prisma.$connect();
   await redis.ping();
