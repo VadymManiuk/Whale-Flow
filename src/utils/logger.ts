@@ -1,8 +1,10 @@
 import pino from "pino";
+import { sanitizeError } from "./sanitize-error.js";
 
 export function createLogger() {
   return pino({
     level: process.env.LOG_LEVEL ?? "info",
+    serializers: { err: sanitizeError },
     redact: [
       "TELEGRAM_BOT_TOKEN",
       "EVM_ETHEREUM_RPC_URLS",
