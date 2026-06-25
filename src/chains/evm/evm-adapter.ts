@@ -1,9 +1,10 @@
-import { createPublicClient, erc20Abi, formatEther, formatUnits, http, type Address, type PublicClient } from "viem";
+import { erc20Abi, formatEther, formatUnits, type Address, type PublicClient } from "viem";
 import type { ChainAdapter } from "../chain-adapter.js";
 import type { ChainId } from "../../models/chain.js";
 import type { NormalizedSwap } from "../../models/swap.js";
 import type { Logger } from "../../utils/logger.js";
 import type { DexScreenerClient } from "../../integrations/price/dexscreener-client.js";
+import { createResilientPublicClient } from "./resilient-public-client.js";
 
 const stablecoins: Record<Extract<ChainId, "ethereum" | "base" | "bnb">, readonly Address[]> = {
   ethereum: ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "0xdAC17F958D2ee523a2206206994597C13D831ec7", "0x6B175474E89094C44Da98b954EedeAC495271d0F"],
@@ -24,13 +25,13 @@ export class EvmAdapter implements ChainAdapter {
   public constructor(
     public readonly chainId: Extract<ChainId, "ethereum" | "base" | "bnb">,
     public readonly name: string,
-    rpcUrl: string | undefined,
+    rpcUrls: readonly string[],
     private readonly logger: Logger,
     private readonly prices: DexScreenerClient
   ) {
     // Live RPC is optional. Creating a viem transport with no URL throws during
     // application startup, while individual chains can remain disabled.
-    this.client = rpcUrl ? createPublicClient({ transport: http(rpcUrl) }) : undefined;
+    this.client = createResilientPublicClient(chainId, rpcUrls, logger);
   }
 
   public async start(): Promise<void> {

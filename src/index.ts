@@ -18,6 +18,7 @@ import { SolanaWalletPoller } from "./jobs/solana-wallet-poller.js";
 import { CoinGeckoClient } from "./integrations/price/coingecko-client.js";
 import { TokenUniverseDiscovery } from "./jobs/token-universe-discovery.js";
 import { PoolCatalogRefresh } from "./jobs/pool-catalog-refresh.js";
+import { mergeRpcUrls } from "./chains/evm/resilient-public-client.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -26,9 +27,9 @@ async function main(): Promise<void> {
   const redis = createRedisClient(config.REDIS_URL);
   const prices = new DexScreenerClient(config.DEXSCREENER_API_BASE);
   const adapters = new Map<ChainId, ChainAdapter>([
-    ["ethereum", new EvmAdapter("ethereum", "Ethereum", config.ALCHEMY_ETHEREUM_RPC_URL, logger, prices)],
-    ["base", new EvmAdapter("base", "Base", config.ALCHEMY_BASE_RPC_URL, logger, prices)],
-    ["bnb", new EvmAdapter("bnb", "BNB Chain", config.BNB_RPC_URL, logger, prices)],
+    ["ethereum", new EvmAdapter("ethereum", "Ethereum", mergeRpcUrls(config.EVM_ETHEREUM_RPC_URLS, config.ALCHEMY_ETHEREUM_RPC_URL), logger, prices)],
+    ["base", new EvmAdapter("base", "Base", mergeRpcUrls(config.EVM_BASE_RPC_URLS, config.ALCHEMY_BASE_RPC_URL), logger, prices)],
+    ["bnb", new EvmAdapter("bnb", "BNB Chain", mergeRpcUrls(config.EVM_BNB_RPC_URLS, config.BNB_RPC_URL), logger, prices)],
     ["solana", new SolanaAdapter(config.HELIUS_API_KEY, logger, prices)]
   ]);
   const detector = new GradualWhaleFlowDetector({
