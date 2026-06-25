@@ -144,7 +144,7 @@ export class EvmWatchlistPoller {
   private cursorKey(pool: Address): string { return `whale-flow:cursor:evm:${this.options.chain}:${pool.toLowerCase()}`; }
   private reduceBatchAfterRateLimit(): void {
     const previousBatchSize = this.effectiveBatchSize;
-    this.effectiveBatchSize = Math.max(10, Math.floor(previousBatchSize / 2));
+    this.effectiveBatchSize = Math.max(5, Math.floor(previousBatchSize / 2));
     this.successfulPolls = 0;
     this.cooldownUntil = Date.now() + 60_000;
     this.options.logger.warn({ chain: this.options.chain, cooldownSeconds: 60, previousBatchSize, nextBatchSize: this.effectiveBatchSize }, "EVM RPC overloaded; scanner paused and batch reduced");
@@ -164,5 +164,5 @@ function isRpcOverloaded(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("status" in error && error.status === 429) return true;
   if (!(error instanceof Error)) return false;
-  return /request timed out|took too long to respond|timeout/i.test(error.message);
+  return /request timed out|took too long to respond|timeout|rate limit|too many requests|capacity limit exceeded|no available rpc providers/i.test(error.message);
 }

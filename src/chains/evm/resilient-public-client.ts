@@ -8,7 +8,8 @@ interface RpcProviderState {
   cooldownUntil: number;
 }
 
-const PROVIDER_COOLDOWN_MS = 60 * 60 * 1_000;
+const RATE_LIMIT_COOLDOWN_MS = 60 * 1_000;
+const CAPACITY_LIMIT_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 
 /**
  * Creates a viem-compatible PublicClient that rotates across RPC URLs.
@@ -50,15 +51,16 @@ export function createResilientPublicClient(
         lastError = error;
         if (!isRpcProviderFailure(error)) throw error;
 
-        provider.cooldownUntil = Date.now() + PROVIDER_COOLDOWN_MS;
+        const cooldownMs = rpcCooldownMs(error);
+        provider.cooldownUntil = Date.now() + cooldownMs;
         logger.warn(
-          { chain, rpcProvider: provider.id, cooldownSeconds: PROVIDER_COOLDOWN_MS / 1_000, reason: rpcFailureReason(error) },
+          { chain, rpcProvider: provider.id, cooldownSeconds: cooldownMs / 1_000, reason: rpcFailureReason(error) },
           "EVM RPC provider temporarily disabled"
         );
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error(`No available RPC providers for ${chain}`);
+    throw lastError instanceof Error ? lastError : new Error(`No available RPC providers for ${chain}; all providers are cooling down`);
   };
 
   return new Proxy(providers[0]!.client, {
@@ -115,4 +117,8 @@ function rpcFailureReason(error: unknown): string {
   if (/request timed out|took too long to respond|timeout/i.test(error.message)) return "timeout";
   if (/fetch failed|network error/i.test(error.message)) return "network";
   return "rpc_failure";
+}
+
+function rpcCooldownMs(error: unknown): number {
+  return rpcFailureReason(error) === "capacity_limit" ? CAPACITY_LIMIT_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS;
 }
