@@ -164,5 +164,5 @@ function isRpcOverloaded(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
   if ("status" in error && error.status === 429) return true;
   if (!(error instanceof Error)) return false;
-  return /request timed out|took too long to respond|timeout|rate limit|too many requests|capacity limit exceeded|no available rpc providers/i.test(error.message);
+  return /request timed out|took too long to respond|timeout|rate limit|too many requests|capacity limit exceeded|limit exceeded|no available rpc providers/i.test(error.message);
 }

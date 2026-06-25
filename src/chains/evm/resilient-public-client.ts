@@ -107,13 +107,13 @@ function providerId(url: string, index: number): string {
 function isRpcProviderFailure(error: unknown): boolean {
   if (typeof error === "object" && error !== null && "status" in error && error.status === 429) return true;
   if (!(error instanceof Error)) return false;
-  return /429|rate limit|too many requests|monthly capacity limit exceeded|capacity limit exceeded|request timed out|took too long to respond|timeout|fetch failed|network error/i.test(error.message);
+  return /429|rate limit|too many requests|monthly capacity limit exceeded|capacity limit exceeded|limit exceeded|request timed out|took too long to respond|timeout|fetch failed|network error/i.test(error.message);
 }
 
 function rpcFailureReason(error: unknown): string {
   if (!(error instanceof Error)) return "unknown";
   if (/monthly capacity limit exceeded|capacity limit exceeded/i.test(error.message)) return "capacity_limit";
-  if (/429|rate limit|too many requests/i.test(error.message)) return "rate_limit";
+  if (/429|rate limit|too many requests|limit exceeded/i.test(error.message)) return "rate_limit";
   if (/request timed out|took too long to respond|timeout/i.test(error.message)) return "timeout";
   if (/fetch failed|network error/i.test(error.message)) return "network";
   return "rpc_failure";
